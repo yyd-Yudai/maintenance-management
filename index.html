@@ -146,15 +146,26 @@
 (function(){
   "use strict";
 
-  // ▼▼▼ ここをApps Script側の設定に合わせて書き換えてください ▼▼▼
-  const API_URL = "https://script.google.com/macros/s/【ここにデプロイIDを貼る】/exec";
-  const TOKEN = "CHANGE-THIS-TO-A-RANDOM-STRING"; // Code.gs の ACCESS_TOKEN と同じ文字列にする
-  // ▲▲▲ ここまで ▲▲▲
+  // API_URLとTOKENはソースコードに書かず、初回にこの端末で入力してlocalStorageに保存します。
+  // （publicリポジトリのソースやページのソース表示に、実際の値が出ないようにするためです）
+  const CONFIG_KEY = "maint_ledger_config_v1";
+
+  function getConfig(){
+    try{
+      const raw = localStorage.getItem(CONFIG_KEY);
+      return raw ? JSON.parse(raw) : null;
+    }catch(e){ return null; }
+  }
+  function setConfig(cfg){
+    localStorage.setItem(CONFIG_KEY, JSON.stringify(cfg));
+  }
+
+  let config = getConfig();
 
   const CATEGORIES = ["家事","車","PC・ガジェット","保険・行政","その他"];
   const SOON_DAYS = 7;
 
-  let state = { tasks: [], catFilter: "all", statusFilter: "all", loaded: false, justCompletedId: null, configError: false };
+  let state = { tasks: [], catFilter: "all", statusFilter: "all", loaded: false, justCompletedId: null, needsConfig: !config };
 
   function todayStr(){
     const d = new Date();
@@ -186,8 +197,8 @@
 
   // ---------- API ----------
   function apiCall(action, extraParams){
-    const params = new URLSearchParams(Object.assign({ action, token: TOKEN }, extraParams || {}));
-    return fetch(API_URL + "?" + params.toString())
+    const params = new URLSearchParams(Object.assign({ action, token: config.token }, extraParams || {}));
+    return fetch(config.apiUrl + "?" + params.toString())
       .then(res => res.json())
       .then(json => {
         if (json.error) throw new Error(json.error);
@@ -196,9 +207,7 @@
   }
 
   function loadTasks(){
-    if (API_URL.indexOf("ここにデプロイID") !== -1) {
-      state.loaded = true; state.configError = true; render(); return;
-    }
+    if (!config) { state.loaded = true; state.needsConfig = true; render(); return; }
     apiCall("list").then(tasks=>{ state.tasks = tasks; state.loaded = true; render(); })
       .catch(err=>{ state.loaded = true; render(); showToast("読み込みに失敗: " + err.message); });
   }
@@ -305,11 +314,28 @@
     const app = document.getElementById("app");
     if(!state.loaded){ app.innerHTML = '<div class="loading">読み込み中…</div>'; return; }
 
-    if(state.configError){
+    if(state.needsConfig){
       app.innerHTML = `
-        <div class="cover"><div class="cover-top"><div><h1>定期メンテナンス台帳</h1></div></div><div class="cover-stitch"></div></div>
-        <div class="setup-warning">初期設定が未完了です。index.html内の <code>API_URL</code> を、GASのデプロイURLに書き換えてください。</div>
+        <div class="cover"><div class="cover-top"><div><h1>定期メンテナンス台帳</h1><p class="sub">最初にこの端末だけの設定をしてください</p></div></div><div class="cover-stitch"></div></div>
+        <div class="setup-warning" style="background:var(--white);color:var(--ink);border:1px solid var(--line);">
+          <p style="margin:0 0 12px;font-size:13px;color:var(--ink-soft);">Apps ScriptのデプロイURLと合言葉(token)を入力してください。この端末のブラウザ内にのみ保存され、GitHubのコードには含まれません。</p>
+          <form id="configForm">
+            <div class="field"><label>Apps Script デプロイURL</label>
+              <input type="text" name="apiUrl" required placeholder="https://script.google.com/macros/s/xxxx/exec" value="${config ? escapeHTML(config.apiUrl) : ''}"></div>
+            <div class="field"><label>合言葉（token）</label>
+              <input type="text" name="token" required placeholder="Code.gsのACCESS_TOKENと同じ文字列" value="${config ? escapeHTML(config.token) : ''}"></div>
+            <div class="modal-actions"><button type="submit" class="btn btn-primary">保存して読み込む</button></div>
+          </form>
+        </div>
       `;
+      document.getElementById("configForm").addEventListener("submit",(e)=>{
+        e.preventDefault();
+        const fd = new FormData(e.target);
+        config = { apiUrl: (fd.get("apiUrl")||"").trim(), token: (fd.get("token")||"").trim() };
+        setConfig(config);
+        state.needsConfig = false; state.loaded = false; render();
+        loadTasks();
+      });
       return;
     }
 
@@ -324,6 +350,7 @@
             <p class="sub">記録すると、次回目安日がGoogleカレンダーに自動で反映されます</p>
           </div>
           <span class="badge-shared">カレンダー連携</span>
+          <button class="badge-shared" id="btnSettings" style="cursor:pointer;">⚙ 設定</button>
         </div>
         <div class="cover-stitch"></div>
       </div>
@@ -350,6 +377,7 @@
     document.querySelectorAll(".tab").forEach(el=>el.addEventListener("click", ()=>{ state.catFilter = el.dataset.cat; render(); }));
     document.getElementById("btnExport").addEventListener("click", exportJSON);
     document.getElementById("btnOpenCal").addEventListener("click", ()=>window.open("https://calendar.google.com/", "_blank"));
+    document.getElementById("btnSettings").addEventListener("click", ()=>{ state.needsConfig = true; render(); });
 
     document.querySelectorAll("[data-action]").forEach(el=>{
       el.addEventListener("click", ()=>{

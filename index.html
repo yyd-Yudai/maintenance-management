@@ -165,7 +165,7 @@
   const CATEGORIES = ["家事","車","PC・ガジェット","保険・行政","その他"];
   const SOON_DAYS = 7;
 
-  let state = { tasks: [], catFilter: "all", statusFilter: "all", loaded: false, justCompletedId: null, needsConfig: !config };
+  let state = { tasks: [], catFilter: "all", statusFilter: "all", loaded: false, justCompletedId: null, needsConfig: !config, pendingIds: new Set() };
 
   function todayStr(){
     const d = new Date();
@@ -213,11 +213,14 @@
   }
 
   function markDone(id){
+    if(state.pendingIds.has(id)) return;
+    state.pendingIds.add(id); render();
     apiCall("markDone", {id}).then(res=>{
+      state.pendingIds.delete(id);
       state.tasks = res.tasks; state.justCompletedId = id; render();
       const task = state.tasks.find(t=>t.id===id);
       showToast((task?task.name:"タスク") + " を記録しました", res.prevSnapshot ? ()=>undoDone(res.prevSnapshot) : null);
-    }).catch(err=>showToast("エラー: " + err.message));
+    }).catch(err=>{ state.pendingIds.delete(id); render(); showToast("エラー: " + err.message); });
   }
   function undoDone(prevSnapshot){
     apiCall("undo", {snapshot: JSON.stringify(prevSnapshot)}).then(tasks=>{ state.tasks = tasks; render(); showToast("取り消しました"); })
@@ -227,10 +230,13 @@
     const task = state.tasks.find(t=>t.id===id);
     if(!task) return;
     if(!confirm(task.name + " を削除しますか？（カレンダーの予定も削除されます）")) return;
+    if(state.pendingIds.has(id)) return;
+    state.pendingIds.add(id); render();
     apiCall("delete", {id}).then(res=>{
+      state.pendingIds.delete(id);
       state.tasks = res.tasks; render();
       showToast(task.name + " を削除しました", res.deletedSnapshot ? ()=>undoDeleteUI(res.deletedSnapshot) : null);
-    }).catch(err=>showToast("エラー: " + err.message));
+    }).catch(err=>{ state.pendingIds.delete(id); render(); showToast("エラー: " + err.message); });
   }
   function undoDeleteUI(snapshot){
     apiCall("undoDelete", {snapshot: JSON.stringify(snapshot)}).then(tasks=>{ state.tasks = tasks; render(); showToast("復元しました"); })
@@ -399,6 +405,7 @@
   function rowHTML(task){
     const {status, daysDiff} = computeStatus(task);
     const showSeal = !!task.lastDone && status === "ok";
+    const pending = state.pendingIds.has(task.id);
     return `
       <div class="task-row status-${status}">
         ${showSeal ? `<div class="seal" data-seal-id="${task.id}">済</div>` : ""}
@@ -417,9 +424,9 @@
         ${task.notes ? `<div class="task-notes">${escapeHTML(task.notes)}</div>` : ""}
         ${task.eventId ? `<div class="cal-note">📅 カレンダーに予定登録済み</div>` : ""}
         <div class="task-actions">
-          <button class="btn btn-done" data-action="done" data-id="${task.id}">✓ 実施済みにする</button>
-          <button class="btn btn-ghost" data-action="edit" data-id="${task.id}">編集</button>
-          <button class="btn btn-danger-ghost" data-action="delete" data-id="${task.id}">削除</button>
+          <button class="btn btn-done" data-action="done" data-id="${task.id}" ${pending ? "disabled" : ""}>${pending ? "処理中…" : "✓ 実施済みにする"}</button>
+          <button class="btn btn-ghost" data-action="edit" data-id="${task.id}" ${pending ? "disabled" : ""}>編集</button>
+          <button class="btn btn-danger-ghost" data-action="delete" data-id="${task.id}" ${pending ? "disabled" : ""}>削除</button>
         </div>
       </div>
     `;

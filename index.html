@@ -244,9 +244,13 @@
   }
   function upsertTask(data, editingId){
     const payload = Object.assign({}, data, editingId ? {id: editingId} : {});
-    apiCall("save", {task: JSON.stringify(payload)}).then(tasks=>{
-      state.tasks = tasks; render();
-      showToast(editingId ? "更新しました" : "追加しました");
+    apiCall("save", {task: JSON.stringify(payload)}).then(res=>{
+      state.tasks = res.tasks; render();
+      if(res.duplicate){
+        showToast(`「${res.duplicateName}」は既に登録されています（追加しませんでした）`);
+      } else {
+        showToast(editingId ? "更新しました" : "追加しました");
+      }
     }).catch(err=>showToast("エラー: " + err.message));
   }
 

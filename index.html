@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>定期メンテナンス台帳</title>
+<title>定期メンテナンス管理</title>
 
 <!-- PWA: ホーム画面追加時のアイコン・全画面起動を制御 -->
 <link rel="manifest" href="manifest.json">
@@ -11,7 +11,7 @@
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="台帳">
+<meta name="apple-mobile-web-app-title" content="管理">
 <meta name="theme-color" content="#1F2C46">
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -171,14 +171,17 @@
     const d = new Date();
     return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
   }
-  function addMonths(dateStr, months){
+  function addPeriod(dateStr, value, unit){
     const d = new Date(dateStr+"T00:00:00");
+    if(unit === "day"){ d.setDate(d.getDate() + value); return d; }
+    if(unit === "week"){ d.setDate(d.getDate() + value * 7); return d; }
     const day = d.getDate();
-    d.setDate(1); d.setMonth(d.getMonth()+months);
+    d.setDate(1); d.setMonth(d.getMonth()+value);
     const daysInTarget = new Date(d.getFullYear(), d.getMonth()+1, 0).getDate();
     d.setDate(Math.min(day, daysInTarget));
     return d;
   }
+  function unitLabel(unit){ return unit === "day" ? "日" : (unit === "week" ? "週" : "ヶ月"); }
   function formatDate(d){
     if(!d) return "―";
     if(typeof d === "string") d = new Date(d+"T00:00:00");
@@ -186,7 +189,7 @@
   }
   function computeStatus(task){
     if(!task.lastDone) return {status:"unset", nextDue:null, daysDiff:null};
-    const next = addMonths(task.lastDone, task.frequencyMonths);
+    const next = addPeriod(task.lastDone, task.frequencyValue, task.frequencyUnit || "month");
     const today = new Date(todayStr()+"T00:00:00");
     const daysDiff = Math.round((next-today)/86400000);
     let status = daysDiff < 0 ? "overdue" : (daysDiff <= SOON_DAYS ? "soon" : "ok");
@@ -326,7 +329,7 @@
 
     if(state.needsConfig){
       app.innerHTML = `
-        <div class="cover"><div class="cover-top"><div><h1>定期メンテナンス台帳</h1><p class="sub">最初にこの端末だけの設定をしてください</p></div></div><div class="cover-stitch"></div></div>
+        <div class="cover"><div class="cover-top"><div><h1>定期メンテナンス管理</h1><p class="sub">最初にこの端末だけの設定をしてください</p></div></div><div class="cover-stitch"></div></div>
         <div class="setup-warning" style="background:var(--white);color:var(--ink);border:1px solid var(--line);">
           <p style="margin:0 0 12px;font-size:13px;color:var(--ink-soft);">Apps ScriptのデプロイURLと合言葉(token)を入力してください。この端末のブラウザ内にのみ保存され、GitHubのコードには含まれません。</p>
           <form id="configForm">
@@ -356,7 +359,7 @@
       <div class="cover">
         <div class="cover-top">
           <div>
-            <h1>定期メンテナンス台帳</h1>
+            <h1>定期メンテナンス管理</h1>
             <p class="sub">記録すると、次回目安日がGoogleカレンダーに自動で反映されます</p>
           </div>
           <span class="badge-shared">カレンダー連携</span>
@@ -416,13 +419,13 @@
         <div class="task-top">
           <div>
             <p class="task-name">${escapeHTML(task.name)}</p>
-            <div class="task-meta"><span class="cat-tag">${escapeHTML(task.category)}</span><span>${task.frequencyMonths}ヶ月ごと</span></div>
+            <div class="task-meta"><span class="cat-tag">${escapeHTML(task.category)}</span><span>${task.frequencyValue}${unitLabel(task.frequencyUnit)}ごと</span></div>
           </div>
           <span class="status-pill">${statusLabel(status, daysDiff)}</span>
         </div>
         <div class="task-dates">
           <div><span class="d-label">前回実施</span>${formatDate(task.lastDone)}</div>
-          <div><span class="d-label">次回目安</span>${task.lastDone ? formatDate(addMonths(task.lastDone, task.frequencyMonths)) : "―"}</div>
+          <div><span class="d-label">次回目安</span>${task.lastDone ? formatDate(addPeriod(task.lastDone, task.frequencyValue, task.frequencyUnit || "month")) : "―"}</div>
         </div>
         ${task.trackStock ? `<div class="stock-note ${isLowStock(task)?'low':''}">在庫 ${task.stockCount ?? 0}個${isLowStock(task) ? "・そろそろ購入を" : ""}</div>` : ""}
         ${task.notes ? `<div class="task-notes">${escapeHTML(task.notes)}</div>` : ""}
@@ -458,8 +461,16 @@
           <div class="row2">
             <div class="field"><label>カテゴリ</label>
               <select name="category">${CATEGORIES.map(c=>`<option value="${c}" ${task && task.category===c ? "selected":""}>${c}</option>`).join("")}</select></div>
-            <div class="field"><label>頻度（ヶ月ごと）</label>
-              <input type="number" name="frequencyMonths" min="1" max="36" required value="${task ? task.frequencyMonths : 2}"></div>
+          </div>
+          <div class="field"><label>頻度</label>
+            <div class="row2">
+              <input type="number" name="frequencyValue" min="1" max="365" required value="${task ? task.frequencyValue : 2}" style="flex:1;">
+              <select name="frequencyUnit" style="flex:1;">
+                <option value="day" ${task && task.frequencyUnit==="day" ? "selected":""}>日ごと</option>
+                <option value="week" ${task && task.frequencyUnit==="week" ? "selected":""}>週ごと</option>
+                <option value="month" ${!task || !task.frequencyUnit || task.frequencyUnit==="month" ? "selected":""}>ヶ月ごと</option>
+              </select>
+            </div>
           </div>
           <div class="field"><label>前回実施日（未実施なら空欄でOK）</label>
             <input type="date" name="lastDone" value="${task && task.lastDone ? task.lastDone : ""}"></div>
@@ -490,7 +501,8 @@
       const data = {
         name: (fd.get("name")||"").trim(),
         category: fd.get("category"),
-        frequencyMonths: Math.max(1, parseInt(fd.get("frequencyMonths"),10) || 1),
+        frequencyValue: Math.max(1, parseInt(fd.get("frequencyValue"),10) || 1),
+        frequencyUnit: fd.get("frequencyUnit") || "month",
         lastDone: fd.get("lastDone") || null,
         trackStock,
         stockCount: trackStock ? Math.max(0, parseInt(fd.get("stockCount"),10) || 0) : null,
